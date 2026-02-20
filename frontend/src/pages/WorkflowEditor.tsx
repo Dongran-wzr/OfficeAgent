@@ -14,8 +14,8 @@ import ReactFlow, {
   NodeChange,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Layout, Button, Drawer, Input, message, Spin, Form, Select, Card, Typography } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons';
+import { Layout, Button, Drawer, Input, message, Spin, Form, Select, Card, Typography, Checkbox, Space, Modal } from 'antd';
+import { PlayCircleOutlined, SaveOutlined, SettingOutlined, FolderOpenOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
 
 import Sidebar from '../components/Sidebar';
@@ -23,11 +23,14 @@ import LLMNode from '../components/nodes/LLMNode';
 import ToolNode from '../components/nodes/ToolNode';
 import InputNode from '../components/nodes/InputNode';
 import OutputNode from '../components/nodes/OutputNode';
+import VisualLog from '../components/VisualLog';
+
+import { saveWorkflow, workflowApi, executionApi } from '../utils/api';
 
 const { Header, Content, Sider } = Layout;
 const { TextArea } = Input;
 const { Option } = Select;
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const nodeTypes = {
   llm: LLMNode,
@@ -60,8 +63,19 @@ const WorkflowEditor = () => {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [form] = Form.useForm();
 
+  // Load Drawer State
+  const [loadDrawerVisible, setLoadDrawerVisible] = useState(false);
+  const [savedWorkflows, setSavedWorkflows] = useState<any[]>([]);
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false);
+
+  // Save Modal State
+  const [saveModalVisible, setSaveModalVisible] = useState(false);
+  const [saveForm] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
   const [debugInput, setDebugInput] = useState('');
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [executionResult, setExecutionResult] = useState(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -133,10 +147,199 @@ const WorkflowEditor = () => {
       setConfigDrawerVisible(false);
   };
 
+  const handleSaveClick = () => {
+      setSaveModalVisible(true);
+  };
+
+  const handleSaveConfirm = async () => {
+    try {
+      const values = await saveForm.validateFields();
+      if (reactFlowInstance) {
+        setSaving(true);
+        const flow = reactFlowInstance.toObject();
+        console.log('Saving flow:', flow);
+        
+        const workflowData = {
+          name: values.name,
+          description: values.description,
+          graphData: JSON.stringify(flow)
+        };
+
+        const result = await saveWorkflow(workflowData);
+        console.log('Save result:', result);
+        message.success('工作流已成功保存到数据库！');
+        setSaveModalVisible(false);
+        saveForm.resetFields();
+      }
+    } catch (error) {
+      console.error('Save failed:', error);
+      message.error('保存失败：' + (error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLoadWorkflows = async () => {
+    try {
+      setLoadingWorkflows(true);
+      const response = await workflowApi.list();
+      setSavedWorkflows(response.data);
+      setLoadingWorkflows(false);
+    } catch (error) {
+      console.error('Load workflows failed:', error);
+      message.error('加载工作流列表失败');
+      setLoadingWorkflows(false);
+    }
+  };
+
+  const handleLoadWorkflow = (workflow: any) => {
+    try {
+      const flow = JSON.parse(workflow.graphData);
+      setNodes(flow.nodes || []);
+      setEdges(flow.edges || []);
+      setLoadDrawerVisible(false);
+      message.success('工作流加载成功！');
+    } catch (error) {
+      console.error('Load workflow failed:', error);
+      message.error('加载工作流失败');
+    }
+  };
+
+  // Helper to get available variables from previous nodes (mock implementation)
+  const getAvailableVariables = () => {
+    // In a real implementation, traverse graph to find upstream nodes
+    return nodes
+        .filter(n => n.id !== selectedNode?.id)
+        .map(n => ({
+            label: `${n.data.label} (${n.id})`,
+            value: `{{${n.id}.output}}` // Example format
+        }));
+  };
+
   const renderConfigForm = () => {
       if (!selectedNode) return null;
 
       switch (selectedNode.type) {
+          case 'input':
+              return (
+                <>
+                  <Form.Item name="label" label="节点名称">
+                    <Input />
+                  </Form.Item>
+                  <Card size="small" title="参数配置" style={{ background: '#fafafa' }}>
+                    <div style={{ marginBottom: 12 }}>
+                      <Text strong>变量名: </Text> <Text code>user_input</Text>
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <Text strong>变量类型: </Text> <Text code>String</Text>
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <Text strong>描述: </Text> 用户本轮的输入内容
+                    </div>
+                    <div>
+                       <Checkbox checked disabled>是否必要</Checkbox>
+                    </div>
+                  </Card>
+                </>
+              );
+          case 'output':
+              return (
+                <>
+                  <Form.Item name="label" label="节点名称">
+                    <Input />
+                  </Form.Item>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text strong>输出配置</Text>
+                      </div>
+                      <Form.List name="outputParams">
+                        {(fields, { add, remove }) => (
+                          <>
+                            {fields.map(({ key, name, ...restField }, index) => (
+                              <Card key={key} size="small" style={{ marginBottom: 8, background: '#f9f9f9' }}>
+                                <Space direction="vertical" style={{ width: '100%' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <Text type="secondary" style={{ fontSize: 12 }}>参数 #{index + 1}</Text>
+                                        <DeleteOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f', cursor: 'pointer' }} />
+                                    </div>
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'name']}
+                                      label="参数名"
+                                      rules={[{ required: true, message: '请输入参数名' }]}
+                                      style={{ marginBottom: 8 }}
+                                    >
+                                      <Input placeholder="例如: audio_url" />
+                                    </Form.Item>
+                                    
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'type']}
+                                      label="参数类型"
+                                      initialValue="input"
+                                      style={{ marginBottom: 8 }}
+                                    >
+                                       <Select>
+                                           <Option value="input">手动输入</Option>
+                                           <Option value="reference">引用</Option>
+                                       </Select>
+                                    </Form.Item>
+
+                                    <Form.Item
+                                      noStyle
+                                      shouldUpdate={(prevValues, currentValues) => {
+                                          const prevType = prevValues.outputParams?.[name]?.type;
+                                          const currType = currentValues.outputParams?.[name]?.type;
+                                          return prevType !== currType;
+                                      }}
+                                    >
+                                      {({ getFieldValue }) => {
+                                          const type = getFieldValue(['outputParams', name, 'type']);
+                                          return type === 'reference' ? (
+                                              <Form.Item
+                                                  {...restField}
+                                                  name={[name, 'value']}
+                                                  label="引用变量"
+                                                  style={{ marginBottom: 0 }}
+                                              >
+                                                  <Select placeholder="选择变量">
+                                                      {getAvailableVariables().map(v => (
+                                                          <Option key={v.value} value={v.value}>{v.label}</Option>
+                                                      ))}
+                                                  </Select>
+                                              </Form.Item>
+                                          ) : (
+                                              <Form.Item
+                                                  {...restField}
+                                                  name={[name, 'value']}
+                                                  label="参数值"
+                                                  style={{ marginBottom: 0 }}
+                                              >
+                                                  <Input placeholder="请输入值" />
+                                              </Form.Item>
+                                          );
+                                      }}
+                                    </Form.Item>
+                                </Space>
+                              </Card>
+                            ))}
+                            <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                              添加输出参数
+                            </Button>
+                          </>
+                        )}
+                      </Form.List>
+                  </div>
+
+                  <Form.Item name="responseTemplate" label="回答内容配置">
+                      <TextArea 
+                          rows={6} 
+                          placeholder="输入回答内容，可使用 {{参数名}} 引用上方配置的参数" 
+                      />
+                  </Form.Item>
+                </>
+              );
           case 'llm':
               return (
                   <>
@@ -176,45 +379,40 @@ const WorkflowEditor = () => {
       }
   };
 
-  const handleSave = () => {
-    if (reactFlowInstance) {
-      const flow = reactFlowInstance.toObject();
-      console.log('Flow saved:', flow);
-      message.success('工作流配置已保存 (Mock)');
-      // TODO: Call backend API to save
-    }
-  };
+
 
   const handleDebug = async () => {
       setLoading(true);
       setDebugLog(['开始执行工作流...']);
       setAudioUrl(null);
+      setExecutionResult(null);
       
       try {
-          // Mock Execution for now, waiting for backend integration
-          setTimeout(() => {
-              setDebugLog(prev => [...prev, `[Input] 接收输入: ${debugInput}`]);
-              setDebugLog(prev => [...prev, `[DeepSeek] 思考中...`]);
-              setDebugLog(prev => [...prev, `[DeepSeek] 输出: 这是一个关于"${debugInput}"的精彩故事...`]);
-              setDebugLog(prev => [...prev, `[Audio] 正在合成音频...`]);
-              
-              const mockAudio = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"; // Mock Audio
-              setAudioUrl(mockAudio);
-              setDebugLog(prev => [...prev, `[Output] 执行完成`]);
-              setLoading(false);
-          }, 2000);
-          
-          // TODO: Call backend execute API
-          /*
-          const response = await axios.post('/api/workflow/execute', {
-              input: debugInput,
+          const response = await executionApi.execute({
+              input: { input: debugInput },
               graph: reactFlowInstance?.toObject()
           });
-          */
+
+          console.log('Execution result:', response.data);
+          setExecutionResult(response.data);
+          setDebugLog(prev => [...prev, '执行完成']);
+          
+          // Check for audio output in steps or final output
+          // Simplified: check if any output value looks like a URL
+          const result = response.data;
+          if (result && result.finalOutput) {
+             Object.values(result.finalOutput).forEach((val: any) => {
+                 if (typeof val === 'string' && (val.endsWith('.mp3') || val.startsWith('http'))) {
+                     setAudioUrl(val);
+                 }
+             });
+          }
+
+          setLoading(false);
 
       } catch (error) {
           console.error(error);
-          setDebugLog(prev => [...prev, `[Error] 执行失败`]);
+          setDebugLog(prev => [...prev, `[Error] 执行失败: ${(error as any).message}`]);
           setLoading(false);
       }
   };
@@ -222,12 +420,13 @@ const WorkflowEditor = () => {
   return (
     <div className="dndflow" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', background: '#fff', borderBottom: '1px solid #e8e8e8' }}>
-            <div style={{ fontSize: 20, fontWeight: 'bold' }}>OfficeAgent Workflow</div>
-            <div>
-                <Button icon={<SaveOutlined />} onClick={handleSave} style={{ marginRight: 10 }}>保存</Button>
-                <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setDrawerVisible(true)}>调试</Button>
-            </div>
-        </Header>
+        <div style={{ fontSize: 20, fontWeight: 'bold' }}>OfficeAgent Workflow</div>
+        <div>
+          <Button icon={<SaveOutlined />} onClick={handleSaveClick} style={{ marginRight: 10 }}>保存</Button>
+          <Button icon={<FolderOpenOutlined />} onClick={() => setLoadDrawerVisible(true)} style={{ marginRight: 10 }}>加载</Button>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setDrawerVisible(true)}>调试</Button>
+        </div>
+      </Header>
       <ReactFlowProvider>
         <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ flex: 1, display: 'flex' }}>
             <Sidebar />
@@ -254,6 +453,75 @@ const WorkflowEditor = () => {
         </div>
       </ReactFlowProvider>
       
+      {/* Load Workflow Drawer */}
+      <Drawer
+        title="加载工作流"
+        placement="right"
+        onClose={() => setLoadDrawerVisible(false)}
+        open={loadDrawerVisible}
+        width={400}
+      >
+        <div style={{ marginBottom: 20 }}>
+          <h4>已保存的工作流</h4>
+          <div style={{ marginBottom: 10 }}>
+            <Button 
+              type="primary" 
+              onClick={handleLoadWorkflows}
+              loading={loadingWorkflows}
+              block
+            >
+              刷新列表
+            </Button>
+          </div>
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: 10, 
+            borderRadius: 4, 
+            minHeight: 200, 
+            maxHeight: 300, 
+            overflowY: 'auto' 
+          }}>
+            {savedWorkflows.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
+                {loadingWorkflows ? '加载中...' : '暂无保存的工作流'}
+              </div>
+            ) : (
+              savedWorkflows.map((workflow: any) => (
+                <Card 
+                  key={workflow.id} 
+                  size="small" 
+                  hoverable
+                  style={{ marginBottom: 10 }}
+                  onClick={() => handleLoadWorkflow(workflow)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }}>{workflow.name || '未命名工作流'}</div>
+                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                        {workflow.description || '无描述'}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                        创建时间: {new Date(workflow.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <Button 
+                      type="primary" 
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleLoadWorkflow(workflow);
+                      }}
+                    >
+                      加载
+                    </Button>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+        </div>
+      </Drawer>
+
       {/* Debug Drawer */}
       <Drawer
         title="调试面板"
@@ -277,11 +545,14 @@ const WorkflowEditor = () => {
           
           <div style={{ marginBottom: 20 }}>
               <h4>执行日志</h4>
-              <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 4, minHeight: 150, maxHeight: 300, overflowY: 'auto' }}>
-                  {debugLog.map((log, index) => (
-                      <div key={index} style={{ marginBottom: 5, fontSize: 12 }}>{log}</div>
-                  ))}
-              </div>
+              <VisualLog result={executionResult} loading={loading} />
+              {!executionResult && !loading && debugLog.length > 0 && (
+                  <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 4, minHeight: 100, maxHeight: 200, overflowY: 'auto', marginTop: 10, fontSize: 12, color: '#999' }}>
+                      {debugLog.map((log, index) => (
+                          <div key={index}>{log}</div>
+                      ))}
+                  </div>
+              )}
           </div>
           
           {audioUrl && (
@@ -326,6 +597,35 @@ const WorkflowEditor = () => {
               {renderConfigForm()}
           </Form>
       </Drawer>
+
+      {/* Save Workflow Modal */}
+      <Modal
+        title="保存工作流"
+        open={saveModalVisible}
+        onOk={handleSaveConfirm}
+        onCancel={() => setSaveModalVisible(false)}
+        confirmLoading={saving}
+      >
+        <Form
+          form={saveForm}
+          layout="vertical"
+          initialValues={{ name: '未命名工作流' }}
+        >
+          <Form.Item
+            name="name"
+            label="工作流名称"
+            rules={[{ required: true, message: '请输入工作流名称' }]}
+          >
+            <Input placeholder="请输入工作流名称" />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label="描述"
+          >
+            <TextArea rows={4} placeholder="请输入工作流描述（可选）" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

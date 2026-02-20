@@ -2,6 +2,8 @@ package com.officeagent.engine.core;
 
 import com.officeagent.engine.model.Graph;
 import com.officeagent.engine.model.Node;
+import com.officeagent.engine.model.execution.ExecutionResult;
+import com.officeagent.engine.model.execution.StepResult;
 import com.officeagent.engine.node.NodeExecutor;
 import org.springframework.stereotype.Component;
 
@@ -23,21 +25,55 @@ public class WorkflowExecutor {
         }
     }
 
-    public Map<String, Object> execute(Graph graph, Map<String, Object> initialInput) {
-        List<Node> sortedNodes = dagEngine.topologicalSort(graph);
-        Map<String, Object> context = new HashMap<>(initialInput);
-
-        for (Node node : sortedNodes) {
-            NodeExecutor executor = executorMap.get(node.getType());
-            if (executor != null) {
-                Map<String, Object> result = executor.execute(node, context);
-                if (result != null) {
-                    context.putAll(result);
+    public ExecutionResult execute(Graph graph, Map<String, Object> initialInput) {
+        ExecutionResult executionResult = new ExecutionResult();
+        long startTime = System.currentTimeMillis();
+        
+        try {
+            List<Node> sortedNodes = dagEngine.topologicalSort(graph);
+            Map<String, Object> context = new HashMap<>(initialInput);
+            
+            for (Node node : sortedNodes) {
+                StepResult step = new StepResult();
+                step.setNodeId(node.getId());
+                step.setNodeName((String) node.getData().getOrDefault("label", node.getType()));
+                step.setNodeType(node.getType());
+                step.setInput(new HashMap<>(context)); // Snapshot context as input (simplified)
+                
+                long nodeStartTime = System.currentTimeMillis();
+                try {
+                    NodeExecutor executor = executorMap.get(node.getType());
+                    if (executor != null) {
+                        Map<String, Object> result = executor.execute(node, context);
+                        if (result != null) {
+                            context.putAll(result);
+                            step.setOutput(result);
+                        }
+                        step.setStatus("SUCCESS");
+                    } else {
+                        step.setStatus("SKIPPED");
+                        step.setError("No executor found");
+                    }
+                } catch (Exception e) {
+                    step.setStatus("FAILED");
+                    step.setError(e.getMessage());
+                    throw e; // Stop execution on failure
+                } finally {
+                    step.setDuration(System.currentTimeMillis() - nodeStartTime);
+                    executionResult.getSteps().add(step);
                 }
-            } else {
-                System.err.println("No executor found for node type: " + node.getType());
             }
+            
+            executionResult.setStatus("SUCCESS");
+            executionResult.setFinalOutput(context);
+            
+        } catch (Exception e) {
+            executionResult.setStatus("FAILED");
+            executionResult.setError(e.getMessage());
+        } finally {
+            executionResult.setTotalDuration(System.currentTimeMillis() - startTime);
         }
-        return context;
+        
+        return executionResult;
     }
 }

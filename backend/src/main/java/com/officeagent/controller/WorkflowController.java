@@ -9,7 +9,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/workflow")
-@CrossOrigin(origins = "http://localhost:5173") // Allow frontend access
+@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:5174"}) // Allow frontend access
 public class WorkflowController {
 
     private final WorkflowService workflowService;

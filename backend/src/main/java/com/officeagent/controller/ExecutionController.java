@@ -3,6 +3,7 @@ package com.officeagent.controller;
 import com.officeagent.domain.ExecutionLog;
 import com.officeagent.engine.core.WorkflowExecutor;
 import com.officeagent.engine.model.Graph;
+import com.officeagent.engine.model.execution.ExecutionResult;
 import com.officeagent.service.ExecutionLogService;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,7 +24,7 @@ public class ExecutionController {
     }
 
     @PostMapping
-    public Map<String, Object> execute(@RequestBody ExecutionRequest request) {
+    public ExecutionResult execute(@RequestBody ExecutionRequest request) {
         ExecutionLog log = new ExecutionLog();
         log.setStartTime(LocalDateTime.now());
         log.setStatus("RUNNING");
@@ -31,11 +32,14 @@ public class ExecutionController {
         executionLogService.save(log);
 
         try {
-            Map<String, Object> result = workflowExecutor.execute(request.getGraph(), request.getInput());
+            ExecutionResult result = workflowExecutor.execute(request.getGraph(), request.getInput());
             
-            log.setStatus("COMPLETED");
+            log.setStatus(result.getStatus());
             log.setEndTime(LocalDateTime.now());
-            log.setOutputData(String.valueOf(result));
+            log.setOutputData(String.valueOf(result.getFinalOutput()));
+            if ("FAILED".equals(result.getStatus())) {
+                log.setExecutionDetails(result.getError());
+            }
             executionLogService.updateById(log);
             
             return result;
