@@ -4,7 +4,7 @@ const API_BASE_url = 'http://localhost:8081/api';
 
 const api = axios.create({
   baseURL: API_BASE_url,
-  timeout: 10000,
+  timeout: 60000, // Increased timeout to 60s for LLM operations
 });
 
 export const workflowApi = {

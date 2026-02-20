@@ -18,6 +18,21 @@ public class InputNodeExecutor implements NodeExecutor {
     @Override
     public Map<String, Object> execute(Node node, Map<String, Object> context) {
         // Input node typically just passes initial context through or validates it
-        return new HashMap<>();
+        // Ensure "input" from external request is mapped to "user_input" if needed by downstream
+        // Or simply expose node ID based output
+        Map<String, Object> result = new HashMap<>();
+        if (context.containsKey("input")) {
+            // Standardize: node_id.output = user_input
+            // In WorkflowExecutor, the result map keys are usually put directly into context
+            // To support "nodeId.output", we should probably key it as "output" here, 
+            // AND WorkflowExecutor should namespace it by node ID.
+            
+            // For now, let's just put "output"
+            result.put("output", context.get("input"));
+            
+            // Also keep global access if needed
+            result.put("user_input", context.get("input"));
+        }
+        return result;
     }
 }

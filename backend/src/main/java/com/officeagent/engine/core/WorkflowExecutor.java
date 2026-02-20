@@ -47,6 +47,10 @@ public class WorkflowExecutor {
                         Map<String, Object> result = executor.execute(node, context);
                         if (result != null) {
                             context.putAll(result);
+                            // Also namespace result by node ID for referencing: {{nodeId.output}}
+                            for (Map.Entry<String, Object> entry : result.entrySet()) {
+                                context.put(node.getId() + "." + entry.getKey(), entry.getValue());
+                            }
                             step.setOutput(result);
                         }
                         step.setStatus("SUCCESS");
@@ -65,7 +69,25 @@ public class WorkflowExecutor {
             }
             
             executionResult.setStatus("SUCCESS");
-            executionResult.setFinalOutput(context);
+            
+            // Only include the output of the "output" node as final output
+            Map<String, Object> finalOutput = new HashMap<>();
+            StepResult lastOutputStep = executionResult.getSteps().stream()
+                .filter(s -> "output".equals(s.getNodeType()) && "SUCCESS".equals(s.getStatus()))
+                .reduce((first, second) -> second) // Get the last one
+                .orElse(null);
+                
+            if (lastOutputStep != null && lastOutputStep.getOutput() != null) {
+                finalOutput.putAll(lastOutputStep.getOutput());
+            } else {
+                // Fallback: if no output node, return context (or empty?)
+                // User requested ONLY final output, so maybe just empty if no output node found.
+                // Or maybe the context contains "final_result" key from OutputNodeExecutor
+                if (context.containsKey("final_result")) {
+                    finalOutput.put("final_result", context.get("final_result"));
+                }
+            }
+            executionResult.setFinalOutput(finalOutput);
             
         } catch (Exception e) {
             executionResult.setStatus("FAILED");

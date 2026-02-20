@@ -352,8 +352,174 @@ const WorkflowEditor = () => {
                               <Option value="通义千问">通义千问</Option>
                           </Select>
                       </Form.Item>
+                      
+                      <Card size="small" title="API 配置" style={{ marginBottom: 24, background: '#fafafa' }}>
+                          <Form.Item 
+                              name="apiBaseUrl" 
+                              label="API 地址" 
+                              rules={[{ required: true, message: '请输入 API 地址' }]}
+                              initialValue="https://api.deepseek.com"
+                          >
+                              <Input placeholder="例如: https://api.deepseek.com" />
+                          </Form.Item>
+                          <Form.Item 
+                              name="apiKey" 
+                              label="API 密钥"
+                              rules={[{ required: true, message: '请输入 API 密钥' }]}
+                          >
+                              <Input.Password placeholder="请输入 API Key" />
+                          </Form.Item>
+                          <Form.Item 
+                              name="temperature" 
+                              label="温度 (Temperature)" 
+                              initialValue={0.7}
+                          >
+                              <Input type="number" step={0.1} min={0} max={2} />
+                          </Form.Item>
+                      </Card>
+
+                      {/* Input Parameters Configuration */}
+                      <div style={{ marginBottom: 16 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                              <Text strong>输入参数配置</Text>
+                          </div>
+                          <Form.List name="inputParams">
+                            {(fields, { add, remove }) => (
+                              <>
+                                {fields.map(({ key, name, ...restField }, index) => (
+                                  <Card key={key} size="small" style={{ marginBottom: 8, background: '#f9f9f9' }}>
+                                    <Space direction="vertical" style={{ width: '100%' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <Text type="secondary" style={{ fontSize: 12 }}>输入参数 #{index + 1}</Text>
+                                            <DeleteOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f', cursor: 'pointer' }} />
+                                        </div>
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'name']}
+                                          label="参数名"
+                                          rules={[{ required: true, message: '请输入参数名' }]}
+                                          style={{ marginBottom: 8 }}
+                                        >
+                                          <Input placeholder="例如: topic" />
+                                        </Form.Item>
+                                        
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'type']}
+                                          label="参数类型"
+                                          initialValue="input"
+                                          style={{ marginBottom: 8 }}
+                                        >
+                                           <Select>
+                                               <Option value="input">手动输入</Option>
+                                               <Option value="reference">引用</Option>
+                                           </Select>
+                                        </Form.Item>
+
+                                        <Form.Item
+                                          noStyle
+                                          shouldUpdate={(prevValues, currentValues) => {
+                                              const prevType = prevValues.inputParams?.[name]?.type;
+                                              const currType = currentValues.inputParams?.[name]?.type;
+                                              return prevType !== currType;
+                                          }}
+                                        >
+                                          {({ getFieldValue }) => {
+                                              const type = getFieldValue(['inputParams', name, 'type']);
+                                              return type === 'reference' ? (
+                                                  <Form.Item
+                                                      {...restField}
+                                                      name={[name, 'value']}
+                                                      label="引用变量"
+                                                      style={{ marginBottom: 0 }}
+                                                  >
+                                                      <Select placeholder="选择变量">
+                                                          {getAvailableVariables().map(v => (
+                                                              <Option key={v.value} value={v.value}>{v.label}</Option>
+                                                          ))}
+                                                      </Select>
+                                                  </Form.Item>
+                                              ) : (
+                                                  <Form.Item
+                                                      {...restField}
+                                                      name={[name, 'value']}
+                                                      label="参数值"
+                                                      style={{ marginBottom: 0 }}
+                                                  >
+                                                      <Input placeholder="请输入值" />
+                                                  </Form.Item>
+                                              );
+                                          }}
+                                        </Form.Item>
+                                    </Space>
+                                  </Card>
+                                ))}
+                                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                                  添加输入参数
+                                </Button>
+                              </>
+                            )}
+                          </Form.List>
+                      </div>
+
+                      {/* Output Parameters Configuration */}
+                      <div style={{ marginBottom: 16 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                              <Text strong>输出参数配置</Text>
+                          </div>
+                          <Form.List name="outputParams">
+                            {(fields, { add, remove }) => (
+                              <>
+                                {fields.map(({ key, name, ...restField }, index) => (
+                                  <Card key={key} size="small" style={{ marginBottom: 8, background: '#f9f9f9' }}>
+                                    <Space direction="vertical" style={{ width: '100%' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <Text type="secondary" style={{ fontSize: 12 }}>输出变量 #{index + 1}</Text>
+                                            <DeleteOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f', cursor: 'pointer' }} />
+                                        </div>
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'name']}
+                                          label="变量名"
+                                          rules={[{ required: true, message: '请输入变量名' }]}
+                                          style={{ marginBottom: 8 }}
+                                        >
+                                          <Input placeholder="例如: generated_text" />
+                                        </Form.Item>
+                                        
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'type']}
+                                          label="变量类型"
+                                          initialValue="string"
+                                          style={{ marginBottom: 8 }}
+                                        >
+                                           <Select disabled>
+                                               <Option value="string">String</Option>
+                                           </Select>
+                                        </Form.Item>
+
+                                        <Form.Item
+                                          {...restField}
+                                          name={[name, 'description']}
+                                          label="描述"
+                                          style={{ marginBottom: 0 }}
+                                        >
+                                          <Input placeholder="变量描述（可选）" />
+                                        </Form.Item>
+                                    </Space>
+                                  </Card>
+                                ))}
+                                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                                  添加输出变量
+                                </Button>
+                              </>
+                            )}
+                          </Form.List>
+                      </div>
+
                       <Form.Item name="prompt" label="提示词模板">
-                          <TextArea rows={6} placeholder="输入提示词，使用 {{input}} 引用上游输入" />
+                          <TextArea rows={6} placeholder="输入提示词，使用 {{input}} 或 {{参数名}} 引用参数" />
                       </Form.Item>
                   </>
               );
