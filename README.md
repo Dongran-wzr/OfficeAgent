@@ -15,7 +15,7 @@ graph TB
     subgraph Frontend [前端应用层 (React + Ant Design)]
         Editor[工作流编辑器 (React Flow)]
         Monitor[实时监控面板]
-         SSE_Client[SSE 客户端]
+        SSE_Client[SSE 客户端]
     end
 
     subgraph Backend [后端服务层 (Spring Boot)]
