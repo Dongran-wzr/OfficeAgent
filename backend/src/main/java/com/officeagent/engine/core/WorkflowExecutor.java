@@ -26,8 +26,16 @@ public class WorkflowExecutor {
     }
 
     public ExecutionResult execute(Graph graph, Map<String, Object> initialInput) {
+        return execute(graph, initialInput, null);
+    }
+
+    public ExecutionResult execute(Graph graph, Map<String, Object> initialInput, ExecutionListener listener) {
         ExecutionResult executionResult = new ExecutionResult();
         long startTime = System.currentTimeMillis();
+        
+        if (listener != null) {
+            listener.onWorkflowStart();
+        }
         
         try {
             List<Node> sortedNodes = dagEngine.topologicalSort(graph);
@@ -39,6 +47,10 @@ public class WorkflowExecutor {
                 step.setNodeName((String) node.getData().getOrDefault("label", node.getType()));
                 step.setNodeType(node.getType());
                 step.setInput(new HashMap<>(context)); // Snapshot context as input (simplified)
+                
+                if (listener != null) {
+                    listener.onNodeStart(step.getNodeId(), step.getNodeName(), step.getNodeType());
+                }
                 
                 long nodeStartTime = System.currentTimeMillis();
                 try {
@@ -61,10 +73,16 @@ public class WorkflowExecutor {
                 } catch (Exception e) {
                     step.setStatus("FAILED");
                     step.setError(e.getMessage());
+                    if (listener != null) {
+                        listener.onError(e.getMessage());
+                    }
                     throw e; // Stop execution on failure
                 } finally {
                     step.setDuration(System.currentTimeMillis() - nodeStartTime);
                     executionResult.getSteps().add(step);
+                    if (listener != null) {
+                        listener.onNodeEnd(step);
+                    }
                 }
             }
             
@@ -79,10 +97,16 @@ public class WorkflowExecutor {
                 
             if (lastOutputStep != null && lastOutputStep.getOutput() != null) {
                 finalOutput.putAll(lastOutputStep.getOutput());
-            } else {
-                // Fallback: if no output node, return context (or empty?)
-                // User requested ONLY final output, so maybe just empty if no output node found.
-                // Or maybe the context contains "final_result" key from OutputNodeExecutor
+            } 
+            
+            // Always try to merge 'voice_url' from context if not present, to ensure audio playback works
+            if (!finalOutput.containsKey("voice_url") && context.containsKey("voice_url")) {
+                finalOutput.put("voice_url", context.get("voice_url"));
+            }
+            
+            if (finalOutput.isEmpty()) {
+                // If no dedicated "output" node found (or it failed), try to find any "final_result" or "voice_url" in context
+                // This is a fallback for simple workflows or when OutputNode type string mismatch
                 if (context.containsKey("final_result")) {
                     finalOutput.put("final_result", context.get("final_result"));
                 }
@@ -92,8 +116,15 @@ public class WorkflowExecutor {
         } catch (Exception e) {
             executionResult.setStatus("FAILED");
             executionResult.setError(e.getMessage());
+            if (listener != null && executionResult.getSteps().isEmpty()) {
+                 // If failed before any step, notify error
+                 listener.onError(e.getMessage());
+            }
         } finally {
             executionResult.setTotalDuration(System.currentTimeMillis() - startTime);
+            if (listener != null) {
+                listener.onWorkflowEnd(executionResult);
+            }
         }
         
         return executionResult;

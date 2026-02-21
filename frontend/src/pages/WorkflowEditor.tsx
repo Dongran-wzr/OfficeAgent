@@ -25,7 +25,7 @@ import InputNode from '../components/nodes/InputNode';
 import OutputNode from '../components/nodes/OutputNode';
 import VisualLog from '../components/VisualLog';
 
-import { saveWorkflow, workflowApi, executionApi } from '../utils/api';
+import { saveWorkflow, workflowApi, API_BASE_URL } from '../utils/api';
 
 const { Header, Content, Sider } = Layout;
 const { TextArea } = Input;
@@ -534,6 +534,100 @@ const WorkflowEditor = () => {
                               <Option value="audio_synthesis">超拟人音频合成</Option>
                           </Select>
                       </Form.Item>
+                      
+                      <Card size="small" title="API 配置" style={{ marginBottom: 24, background: '#fafafa' }}>
+                           <Form.Item 
+                               name="apiKey" 
+                               label="API Key" 
+                               rules={[{ required: true, message: '请输入 API Key' }]}
+                           >
+                               <Input.Password placeholder="请输入 API Key" />
+                           </Form.Item>
+                           <Form.Item 
+                              name="model" 
+                              label="模型名称" 
+                              initialValue="qwen3-tts-flash"
+                              rules={[{ required: true, message: '请输入模型名称' }]}
+                          >
+                              <Input placeholder="例如: qwen3-tts-flash" />
+                          </Form.Item>
+                       </Card>
+
+                      <Card size="small" title="输入参数配置" style={{ marginBottom: 24, background: '#fafafa' }}>
+                          <Form.Item
+                              name="textType"
+                              label="文本 (text) 类型"
+                              initialValue="input"
+                              style={{ marginBottom: 8 }}
+                          >
+                              <Select>
+                                  <Option value="input">手动输入</Option>
+                                  <Option value="reference">引用变量</Option>
+                              </Select>
+                          </Form.Item>
+                          <Form.Item
+                              noStyle
+                              shouldUpdate={(prevValues, currentValues) => prevValues.textType !== currentValues.textType}
+                          >
+                              {({ getFieldValue }) => 
+                                  getFieldValue('textType') === 'reference' ? (
+                                      <Form.Item name="text" label="文本 (text) 值" rules={[{ required: true, message: '请选择引用变量' }]}>
+                                          <Select placeholder="选择上游输出">
+                                              {getAvailableVariables().map(v => (
+                                                  <Option key={v.value} value={v.value}>{v.label}</Option>
+                                              ))}
+                                          </Select>
+                                      </Form.Item>
+                                  ) : (
+                                      <Form.Item name="text" label="文本 (text) 值" rules={[{ required: true, message: '请输入文本' }]}>
+                                          <TextArea rows={4} placeholder="请输入要合成的文本" />
+                                      </Form.Item>
+                                  )
+                              }
+                          </Form.Item>
+
+                          <Form.Item
+                              name="voice"
+                              label="音色 (voice)"
+                              initialValue="Cherry"
+                          >
+                              <Select>
+                                  <Option value="Cherry">Cherry</Option>
+                                  <Option value="Serena">Serena</Option>
+                                  <Option value="Ethan">Ethan</Option>
+                              </Select>
+                          </Form.Item>
+                          
+                          <Form.Item
+                              name="language_type"
+                              label="语言类型 (language_type)"
+                              initialValue="Auto"
+                          >
+                              <Select>
+                                  <Option value="Auto">Auto</Option>
+                              </Select>
+                          </Form.Item>
+                      </Card>
+
+                      <Card size="small" title="输出参数配置" style={{ marginBottom: 24, background: '#fafafa' }}>
+                           <Form.Item 
+                               name="outputParams_voice_url_name" 
+                               label="输出变量名" 
+                               initialValue="voice_url"
+                               rules={[{ required: true, message: '请输入变量名' }]}
+                           >
+                               <Input placeholder="例如: voice_url" disabled />
+                           </Form.Item>
+                           <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+                               类型: String (音频文件链接)
+                           </div>
+                           <Form.Item 
+                               name="outputParams_voice_url_desc" 
+                               label="描述" 
+                           >
+                               <Input placeholder="输出变量描述" />
+                           </Form.Item>
+                      </Card>
                   </>
               );
           default:
@@ -547,6 +641,91 @@ const WorkflowEditor = () => {
 
 
 
+  const handleStreamEvent = (type: string, data: any) => {
+      setExecutionResult((prev: any) => {
+          // Initialize if null
+          const currentResult = prev || {
+              status: 'RUNNING',
+              totalDuration: 0,
+              steps: [],
+              finalOutput: null
+          };
+
+          if (type === 'WORKFLOW_START') {
+               return currentResult;
+          }
+
+          if (type === 'NODE_START') {
+              // Check if step exists
+              const exists = currentResult.steps.some((s: any) => s.nodeId === data.nodeId);
+              if (!exists) {
+                  return {
+                      ...currentResult,
+                      steps: [...currentResult.steps, {
+                          nodeId: data.nodeId,
+                          nodeName: data.nodeName,
+                          nodeType: data.nodeType,
+                          status: 'RUNNING',
+                          duration: 0,
+                          input: data.input || {}, 
+                          output: null
+                      }]
+                  };
+              }
+              return currentResult;
+          }
+
+          if (type === 'NODE_END') {
+              return {
+                  ...currentResult,
+                  steps: currentResult.steps.map((s: any) => 
+                      s.nodeId === data.nodeId ? { ...s, ...data, status: 'SUCCESS' } : s
+                  )
+              };
+          }
+
+          if (type === 'WORKFLOW_END') {
+              return data; // Replace with final result
+          }
+
+          if (type === 'ERROR') {
+              return {
+                  ...currentResult,
+                  status: 'FAILED',
+                  error: data
+              };
+          }
+
+          return currentResult;
+      });
+
+      // Handle logs and audio
+      if (type === 'NODE_START') {
+          setDebugLog(prev => [...prev, `开始执行节点: ${data.nodeName} (${data.nodeType})`]);
+      } else if (type === 'NODE_END') {
+          setDebugLog(prev => [...prev, `节点执行完成: ${data.nodeName}`]);
+          
+          if (data.output) {
+              if (data.output.voice_url) {
+                  setAudioUrl(data.output.voice_url);
+              } else {
+                  // Fallback check
+                  Object.values(data.output).forEach((val: any) => {
+                       if (typeof val === 'string' && (val.endsWith('.mp3') || val.includes('/audio/'))) {
+                           setAudioUrl(val);
+                       }
+                  });
+              }
+          }
+      } else if (type === 'WORKFLOW_END') {
+          if (data.finalOutput && data.finalOutput.voice_url) {
+              setAudioUrl(data.finalOutput.voice_url);
+          }
+      } else if (type === 'ERROR') {
+          setDebugLog(prev => [...prev, `[Error] ${data}`]);
+      }
+  };
+
   const handleDebug = async () => {
       setLoading(true);
       setDebugLog(['开始执行工作流...']);
@@ -554,31 +733,60 @@ const WorkflowEditor = () => {
       setExecutionResult(null);
       
       try {
-          const response = await executionApi.execute({
+          const payload = {
               input: { input: debugInput },
               graph: reactFlowInstance?.toObject()
+          };
+
+          const response = await fetch(`${API_BASE_URL}/execute/stream`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(payload),
           });
 
-          console.log('Execution result:', response.data);
-          setExecutionResult(response.data);
-          setDebugLog(prev => [...prev, '执行完成']);
-          
-          // Check for audio output in steps or final output
-          // Simplified: check if any output value looks like a URL
-          const result = response.data;
-          if (result && result.finalOutput) {
-             Object.values(result.finalOutput).forEach((val: any) => {
-                 if (typeof val === 'string' && (val.endsWith('.mp3') || val.startsWith('http'))) {
-                     setAudioUrl(val);
-                 }
-             });
+          if (!response.body) {
+              throw new Error('ReadableStream not supported in this browser.');
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n\n');
+              buffer = lines.pop() || ''; 
+
+              for (const line of lines) {
+                  const eventMatch = line.match(/^event:(.*)$/m);
+                  const dataMatch = line.match(/^data:(.*)$/m);
+                  
+                  if (eventMatch && dataMatch) {
+                      const eventType = eventMatch[1].trim();
+                      const eventDataStr = dataMatch[1].trim();
+                      
+                      try {
+                          const eventData = JSON.parse(eventDataStr);
+                          handleStreamEvent(eventType, eventData);
+                      } catch (e) {
+                          console.error('Error parsing SSE data:', e);
+                      }
+                  }
+              }
           }
 
           setLoading(false);
+          setDebugLog(prev => [...prev, '执行完成']);
 
       } catch (error) {
           console.error(error);
           setDebugLog(prev => [...prev, `[Error] 执行失败: ${(error as any).message}`]);
+          setExecutionResult((prev: any) => prev ? { ...prev, status: 'FAILED', error: (error as any).message } : null);
           setLoading(false);
       }
   };

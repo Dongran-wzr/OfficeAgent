@@ -15,10 +15,10 @@ import java.util.Map;
 @Component
 public class LLMNodeExecutor implements NodeExecutor {
 
-    private final ChatClient.Builder chatClientBuilder;
-
-    public LLMNodeExecutor(ChatClient.Builder chatClientBuilder) {
-        this.chatClientBuilder = chatClientBuilder;
+    // Removed ChatClient.Builder dependency to avoid auto-configuration issues with missing API keys
+    
+    public LLMNodeExecutor() {
+        // Default constructor
     }
 
     @Override
@@ -123,7 +123,7 @@ public class LLMNodeExecutor implements NodeExecutor {
                     .build());
             client = ChatClient.create(chatModel);
         } else {
-            client = chatClientBuilder.build();
+             throw new IllegalArgumentException("Missing LLM API configuration (API Key or Base URL).");
         }
 
         // 4. Call AI

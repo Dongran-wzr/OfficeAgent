@@ -26,3 +26,10 @@ logging:
     com.officeagent: DEBUG
     org.springframework.web: DEBUG
     org.springframework.web.servlet.DispatcherServlet: DEBUG
+
+minio:
+  endpoint: http://localhost:9000
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucketName: officeagent
+  publicUrl: http://localhost:9000
